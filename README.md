@@ -13,19 +13,19 @@ Følgende diagram viser hvordan klient, server, nettleser og Docker-nettverket s
 ```mermaid
 flowchart TB
     subgraph Host["Vertsmaskin (Windows / Linux)"]
-        Browser["Nettleser / curl\nhttp://localhost:8080/"]
+        Browser["Nettleser / curl<br/>http://localhost:8080/"]
     end
 
     subgraph DockerNet["Docker Nettverk: rust-http_default"]
         subgraph ServerContainer["Container: rust-http-server (Port 8080)"]
             Listener["TcpListener (0.0.0.0:8080)"]
-            Pool["ThreadPool\n(8 Arbeidstråder + MPSC Kanal)"]
+            Pool["ThreadPool<br/>(8 Arbeidstråder + MPSC Kanal)"]
             
             subgraph HttpPipeline["HTTP/1.1 Protokollmotor"]
                 Reader["BufReader (TCP Stream)"]
-                Parser["Request Parser\n(Metode, URL, Headere, Body)"]
+                Parser["Request Parser<br/>(Metode, URL, Headere, Body)"]
                 Router{"Ruter / Dispatcher"}
-                Serializer["Response Serializer\n(Statuslinje, Headere, Body)"]
+                Serializer["Response Serializer<br/>(Statuslinje, Headere, Body)"]
             end
             
             subgraph Routes["Endepunkter"]
@@ -40,7 +40,7 @@ flowchart TB
 
         subgraph ClientContainer["Container: rust-http-client"]
             ClientRunner["Test Runner CLI"]
-            HttpClientModule["HttpClient Modul\n(URL-parser, TCP Socket, Request Builder)"]
+            HttpClientModule["HttpClient Modul<br/>(URL-parser, TCP Socket, Request Builder)"]
         end
     end
 
@@ -57,33 +57,35 @@ flowchart TB
     Router --> R5
     Router --> R6
     Routes --> Serializer
-    Serializer -->|Raw HTTP Bytes over TCP| Listener
+    Serializer -->|Rå HTTP Bytes over TCP| Listener
 ```
 
 ---
 
 ## 🔄 Protokoll-Livssyklus (Sekvensdiagram)
 
-Dette diagrammet illustrerer nøyaktig hva som sendes over rå TCP-sockets når en HTTP-forespørsel utføres og besvares:
+Dette diagrammet illustrerer overføringen av data over rå TCP-sockets når en HTTP-forespørsel utføres og besvares:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Client as 🚀 HTTP-Klient / Nettleser
-    participant Socket as 🔌 TCP Socket (Port 8080)
-    participant Worker as 🧵 Server Arbeidstråd
-    participant Engine as ⚙️ Protokollmotor & Ruter
+    participant Client as HTTP-Klient / Nettleser
+    participant Socket as TCP Socket (Port 8080)
+    participant Worker as Server Arbeidstråd
+    participant Engine as Protokollmotor og Ruter
 
-    Client->>Socket: TCP 3-veis håndtrykk (SYN -> SYN-ACK -> ACK)
-    Client->>Socket: Sender rå HTTP/1.1-forespørsel bytes:\nPOST /echo HTTP/1.1\r\nHost: server:8080\r\nContent-Type: application/json\r\nContent-Length: 32\r\nConnection: close\r\n\r\n{"melding":"Hei fra klienten!"}
+    Client->>Socket: TCP 3-veis håndtrykk (SYN, SYN-ACK, ACK)
+    Client->>Socket: Sender HTTP Request (POST /echo)
+    Note over Client,Socket: POST /echo HTTP/1.1<br/>Host: server:8080<br/>Content-Type: application/json<br/>Content-Length: 32<br/>Connection: close<br/><br/>{"melding":"Hei fra klienten!"}
 
     Socket->>Worker: Tildeler aktiv TcpStream fra ThreadPool
     Worker->>Engine: Request::parse(&mut BufReader)
     Note over Engine: Leser requestlinje, parser headere til HeaderMap,<br/>leser nøyaktig Content-Length bytes med body
-    Engine->>Engine: Ruter matcher "POST /echo"
+    Engine->>Engine: Ruter matcher POST /echo
     Engine->>Worker: Genererer Response::ok().json(...)
 
-    Worker->>Socket: Sender rå HTTP/1.1-svar bytes:\nHTTP/1.1 200 OK\r\nServer: RustCustomHttp/1.0\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: 78\r\nConnection: close\r\n\r\n{"echoed_body":{...},"length":32}
+    Worker->>Socket: Sender HTTP Response (200 OK)
+    Note over Socket,Worker: HTTP/1.1 200 OK<br/>Server: RustCustomHttp/1.0<br/>Content-Type: application/json<br/>Content-Length: 78<br/>Connection: close<br/><br/>{"echoed_body":{...},"length":32}
 
     Socket->>Client: Mottar HTTP-svar over nettverket
     Client->>Client: Response::parse(&mut BufReader)
@@ -101,34 +103,34 @@ classDiagram
         +String uri
         +String version
         +HeaderMap headers
-        +Vec~u8~ body
-        +new(Method, String) Request
-        +path() &str
-        +query_param(&str) Option~String~
-        +body_as_str() Option~&str~
-        +to_bytes() Vec~u8~
-        +parse(BufRead) Result~Request, HttpError~
+        +Vec body
+        +new(method, uri) Request
+        +path() str
+        +query_param(key) Option
+        +body_as_str() Option
+        +to_bytes() Vec
+        +parse(reader) Result
     }
 
     class Response {
         +String version
         +StatusCode status
         +HeaderMap headers
-        +Vec~u8~ body
+        +Vec body
         +ok() Response
         +not_found() Response
-        +bad_request(String) Response
-        +json(String) Response
-        +html(String) Response
-        +to_bytes() Vec~u8~
-        +parse(BufRead) Result~Response, HttpError~
+        +bad_request(msg) Response
+        +json(json_str) Response
+        +html(html_str) Response
+        +to_bytes() Vec
+        +parse(reader) Result
     }
 
     class HeaderMap {
-        -BTreeMap~String, (String, String)~ headers
-        +insert(String, String)
-        +get(&str) Option~&str~
-        +content_length() Option~usize~
+        -BTreeMap headers
+        +insert(key, value)
+        +get(key) Option
+        +content_length() Option
         +iter() Iterator
     }
 
@@ -141,31 +143,31 @@ classDiagram
         Head
         Options
         Patch
-        Custom(String)
-        +as_str() &str
+        Custom
+        +as_str() str
     }
 
     class StatusCode {
         +u16 code
-        +&str reason
+        +str reason
         +as_u16() u16
-        +reason_phrase() &str
-        +from_u16(u16) Result
+        +reason_phrase() str
+        +from_u16(code) Result
     }
 
     class HttpClient {
         +u64 default_timeout_ms
-        +parse_url(&str) Result
-        +send(Request, &str, u16) Result~Response, HttpError~
-        +get(&str) Result~Response, HttpError~
-        +post(&str, Vec~u8~, &str) Result~Response, HttpError~
+        +parse_url(url) Result
+        +send(req, host, port) Result
+        +get(url) Result
+        +post(url, body, content_type) Result
     }
 
     class ThreadPool {
-        -Vec~Worker~ workers
+        -Vec workers
         -Sender sender
-        +new(usize) ThreadPool
-        +execute(FnOnce)
+        +new(size) ThreadPool
+        +execute(job)
     }
 
     Request --> Method
@@ -183,26 +185,26 @@ classDiagram
 ```mermaid
 flowchart LR
     subgraph BuildStage["Byggesteg (rust:alpine)"]
-        SRC["Rust Kildekode\n(src/, tests/, Cargo.toml)"]
-        TESTS["cargo test --release\n(Protokoll- og integrasjonstester)"]
-        BUILD["cargo build --release\n(Kompilerer server & client)"]
+        SRC["Rust Kildekode<br/>(src/, tests/, Cargo.toml)"]
+        TESTS["cargo test --release<br/>(Protokoll- og integrasjonstester)"]
+        BUILD["cargo build --release<br/>(Kompilerer server og klient)"]
         SRC --> TESTS --> BUILD
     end
 
     subgraph RuntimeServer["Kjørebilde 1: rust-http-server (alpine)"]
-        SRV_BIN["Kopiert binærfil: /usr/local/bin/server"]
-        SRV_PORT["EXPOSE 8080\nCMD ['server']"]
+        SRV_BIN["Kopiert binærfil:<br/>/usr/local/bin/server"]
+        SRV_PORT["EXPOSE 8080<br/>CMD ['server']"]
         SRV_BIN --> SRV_PORT
     end
 
     subgraph RuntimeClient["Kjørebilde 2: rust-http-client (alpine)"]
-        CLI_BIN["Kopiert binærfil: /usr/local/bin/client"]
-        CLI_RUN["CMD ['client']\nKobler til http://server:8080"]
+        CLI_BIN["Kopiert binærfil:<br/>/usr/local/bin/client"]
+        CLI_RUN["CMD ['client']<br/>Kobler til http://server:8080"]
         CLI_BIN --> CLI_RUN
     end
 
     BUILD -->|Kopierer server binær| SRV_BIN
-    BUILD -->|Kopierer client binær| CLI_BIN
+    BUILD -->|Kopierer klient binær| CLI_BIN
 ```
 
 ---
